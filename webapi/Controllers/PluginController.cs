@@ -21,6 +21,7 @@ namespace CopilotChat.WebApi.Controllers;
 /// <summary>
 /// Controller responsible for returning the service options to the client.
 /// </summary>
+[AllowAnonymous]
 [ApiController]
 public class PluginController : ControllerBase
 {

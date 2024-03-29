@@ -22,6 +22,7 @@ using CopilotChat.WebApi.Plugins.Chat;
 using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
 using CopilotChat.WebApi.Utilities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -39,6 +40,7 @@ namespace CopilotChat.WebApi.Controllers;
 /// <summary>
 /// Controller responsible for handling chat messages and responses.
 /// </summary>
+[AllowAnonymous]
 [ApiController]
 public class ChatController : ControllerBase, IDisposable
 {

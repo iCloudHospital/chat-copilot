@@ -1,22 +1,30 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using CopilotChat.WebApi.Configuration;
+using CopilotChat.WebApi.Configuration.Authorization;
 using CopilotChat.WebApi.Extensions;
 using CopilotChat.WebApi.Hubs;
 using CopilotChat.WebApi.Services;
+using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.ApplicationInsights.Extensibility.Implementation;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.OpenApi.Models;
 
 namespace CopilotChat.WebApi;
 
@@ -33,6 +41,7 @@ public sealed class Program
     public static async Task Main(string[] args)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+        JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 
         // Load in configuration settings from appsettings.json, user-secrets, key vaults, etc...
         builder.Host.AddConfiguration();
@@ -69,11 +78,38 @@ public sealed class Program
         // Add named HTTP clients for IHttpClientFactory
         builder.Services.AddHttpClient();
 
+        CopilotApiConfiguration copliotApiConfiguration = ((IConfiguration)builder.Configuration).GetSection(nameof(CopilotApiConfiguration)).Get<CopilotApiConfiguration>() ?? new CopilotApiConfiguration();
+        builder.Services.AddSingleton(copliotApiConfiguration);
+
+        builder.Services.AddSwaggerGen(options =>
+        {
+            options.SwaggerDoc(copliotApiConfiguration!.ApiVersion, new OpenApiInfo { Title = copliotApiConfiguration.ApiName, Version = copliotApiConfiguration.ApiVersion });
+
+            options.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.OAuth2,
+                Flows = new OpenApiOAuthFlows
+                {
+                    AuthorizationCode = new OpenApiOAuthFlow
+                    {
+                        AuthorizationUrl = new Uri($"{copliotApiConfiguration.IdentityServerBaseUrl}/connect/authorize"),
+                        TokenUrl = new Uri($"{copliotApiConfiguration.IdentityServerBaseUrl}/connect/token"),
+                        Scopes = new Dictionary<string, string> {
+                                { copliotApiConfiguration.OidcApiName, copliotApiConfiguration.ApiName }
+                            }
+                    }
+                }
+            });
+
+            options.OperationFilter<AuthorizeCheckOperationFilter>();
+
+        });
+
+
         // Add in the rest of the services.
         builder.Services
             .AddMaintenanceServices()
             .AddEndpointsApiExplorer()
-            .AddSwaggerGen()
             .AddCorsPolicy(builder.Configuration)
             .AddControllers()
             .AddJsonOptions(options =>
@@ -84,6 +120,9 @@ public sealed class Program
 
         // Configure middleware and endpoints
         WebApplication app = builder.Build();
+
+        app.AddForwardHeaders();
+
         app.UseDefaultFiles();
         app.UseStaticFiles();
         app.UseCors();
@@ -101,7 +140,14 @@ public sealed class Program
         if (app.Environment.IsDevelopment())
         {
             app.UseSwagger();
-            app.UseSwaggerUI();
+            app.UseSwaggerUI(c =>
+            {
+                c.SwaggerEndpoint($"{copliotApiConfiguration?.ApiBaseUrl}/swagger/v1/swagger.json", copliotApiConfiguration?.ApiName);
+
+                c.OAuthClientId(copliotApiConfiguration?.OidcSwaggerUIClientId);
+                c.OAuthAppName(copliotApiConfiguration?.ApiName);
+                c.OAuthUsePkce();
+            });
 
             // Redirect root URL to Swagger UI URL
             app.MapWhen(

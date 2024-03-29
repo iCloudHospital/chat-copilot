@@ -20,6 +20,7 @@ using Microsoft.KernelMemory;
 
 namespace CopilotChat.WebApi.Controllers;
 
+[AllowAnonymous]
 [ApiController]
 public class ChatArchiveController : ControllerBase
 {

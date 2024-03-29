@@ -15,6 +15,7 @@ using CopilotChat.WebApi.Models.Storage;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -30,6 +31,7 @@ namespace CopilotChat.WebApi.Controllers;
 /// <remarks>
 /// This controller is responsible for contracts that are not possible to fulfill by kernel memory components.
 /// </remarks>
+[AllowAnonymous]
 [ApiController]
 public class DocumentController : ControllerBase
 {

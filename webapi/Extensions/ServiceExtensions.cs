@@ -5,21 +5,32 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
+using System.Text;
 using CopilotChat.Shared;
 using CopilotChat.WebApi.Auth;
+using CopilotChat.WebApi.Configuration;
 using CopilotChat.WebApi.Models.Storage;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
 using CopilotChat.WebApi.Utilities;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.Azure.Cosmos.Core;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.KernelMemory;
 using Microsoft.KernelMemory.Diagnostics;
 
@@ -140,20 +151,26 @@ public static class CopilotChatServiceExtensions
     /// </summary>
     internal static IServiceCollection AddCorsPolicy(this IServiceCollection services, IConfiguration configuration)
     {
-        string[] allowedOrigins = configuration.GetSection("AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-        if (allowedOrigins.Length > 0)
+        var copliotApiConfiguration = configuration.GetSection(nameof(CopilotApiConfiguration)).Get<CopilotApiConfiguration>();
+
+        services.AddCors(options =>
         {
-            services.AddCors(options =>
-            {
-                options.AddDefaultPolicy(
-                    policy =>
+            options.AddDefaultPolicy(
+                builder =>
+                {
+                    if (copliotApiConfiguration?.CorsAllowAnyOrigin ?? true)
                     {
-                        policy.WithOrigins(allowedOrigins)
-                            .WithMethods("POST", "GET", "PUT", "DELETE", "PATCH")
-                            .AllowAnyHeader();
-                    });
-            });
-        }
+                        builder.AllowAnyOrigin();
+                    }
+                    else
+                    {
+                        builder.WithOrigins(copliotApiConfiguration.CorsAllowOrigins);
+                    }
+
+                    builder.AllowAnyHeader();
+                    builder.AllowAnyMethod();
+                });
+        });
 
         return services;
     }
@@ -260,14 +277,52 @@ public static class CopilotChatServiceExtensions
     public static IServiceCollection AddChatCopilotAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddScoped<IAuthInfo, AuthInfo>();
+
+        var copliotApiConfiguration = configuration.GetSection(nameof(CopilotApiConfiguration)).Get<CopilotApiConfiguration>();
         var config = services.BuildServiceProvider().GetRequiredService<IOptions<ChatAuthenticationOptions>>().Value;
+        var identityOptions = configuration.GetSection(nameof(IdentityOptions)).Get<IdentityOptions>();
+
         switch (config.Type)
         {
             case ChatAuthenticationOptions.AuthenticationType.AzureAd:
                 services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     .AddMicrosoftIdentityWebApi(configuration.GetSection($"{ChatAuthenticationOptions.PropertyName}:AzureAd"));
                 break;
+            case ChatAuthenticationOptions.AuthenticationType.Identity:
+                //services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
+                services.AddAuthentication(options =>
+                {
+                    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+                    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+                    options.DefaultSignInScheme = JwtBearerDefaults.AuthenticationScheme;
+                    options.DefaultForbidScheme = JwtBearerDefaults.AuthenticationScheme;
+                })
+                .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+                {
+                    options.Authority = copliotApiConfiguration?.IdentityServerBaseUrl;
+                    options.RequireHttpsMetadata = copliotApiConfiguration?.RequireHttpsMetadata ?? true;
+                    options.Audience = copliotApiConfiguration?.OidcApiName;
+                })
+                //.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme)
+                //.AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
+                //{
+                //    options.Authority = config.Identity?.ApiBaseUrl;
+                //    options.ClientId = config.Identity?.ClientId;
+                //    options.ClientSecret = config.Identity?.ClientSecret;
+                //    options.SaveTokens = true;
+                //    options.GetClaimsFromUserInfoEndpoint = true;
+                //    if (!string.IsNullOrWhiteSpace(config.Identity?.Scope))
+                //    {
+                //        foreach (string scope in config.Identity!.Scope.Split(' '))
+                //        {
+                //            options.Scope.Add(scope);
+                //        }
+                //    }
+                //})
+                ;
+                break;
             case ChatAuthenticationOptions.AuthenticationType.None:
                 services.AddAuthentication(PassThroughAuthenticationHandler.AuthenticationScheme)
                     .AddScheme<AuthenticationSchemeOptions, PassThroughAuthenticationHandler>(
@@ -281,6 +336,8 @@ public static class CopilotChatServiceExtensions
 
         return services;
     }
+
+
 
     /// <summary>
     /// Trim all string properties, recursively.
@@ -330,5 +387,18 @@ public static class CopilotChatServiceExtensions
                 }
             }
         }
+    }
+
+    public static void AddForwardHeaders(this IApplicationBuilder app)
+    {
+        var forwardingOptions = new ForwardedHeadersOptions()
+        {
+            ForwardedHeaders = ForwardedHeaders.All
+        };
+
+        forwardingOptions.KnownNetworks.Clear();
+        forwardingOptions.KnownProxies.Clear();
+
+        app.UseForwardedHeaders(forwardingOptions);
     }
 }

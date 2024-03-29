@@ -21,6 +21,7 @@ namespace CopilotChat.WebApi.Controllers;
 /// 2. Accepting/rejecting invitation links.
 /// 3. Managing participants in a chat session.
 /// </summary>
+[AllowAnonymous]
 [ApiController]
 public class ChatParticipantController : ControllerBase
 {

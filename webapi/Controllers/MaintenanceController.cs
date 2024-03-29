@@ -3,6 +3,7 @@
 using System.Threading;
 using CopilotChat.WebApi.Models.Response;
 using CopilotChat.WebApi.Options;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,7 @@ namespace CopilotChat.WebApi.Controllers;
 /// <summary>
 /// Controller for reporting the status of chat migration.
 /// </summary>
+[AllowAnonymous]
 [ApiController]
 public class MaintenanceController : ControllerBase
 {

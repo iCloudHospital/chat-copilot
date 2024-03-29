@@ -29,6 +29,7 @@ namespace CopilotChat.WebApi.Controllers;
 /// This controller is responsible for creating new chat sessions, retrieving chat sessions,
 /// retrieving chat messages, and editing chat sessions.
 /// </summary>
+[AllowAnonymous]
 [ApiController]
 public class ChatHistoryController : ControllerBase
 {
