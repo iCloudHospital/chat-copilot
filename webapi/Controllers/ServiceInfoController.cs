@@ -5,10 +5,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using CopilotChat.WebApi.Configuration;
 using CopilotChat.WebApi.Models.Response;
 using CopilotChat.WebApi.Options;
 using DocumentFormat.OpenXml.InkML;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -85,12 +87,12 @@ public class ServiceInfoController : ControllerBase
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [Authorize]
-    public IActionResult GetUserInfo()
+    public async Task<IActionResult> GetUserInfo()
     {
         string userid = this.User.FindFirst("sub")?.Value ?? "";
-        string cookie = this.HttpContext.Request.Cookies["Identity.Application"] ?? "";
+        var token = await this.HttpContext.GetTokenAsync("access_token");
 
-        return this.Ok(new { id = userid, cookie = cookie });
+        return this.Ok(new { id = userid, token = token });
     }
 
 

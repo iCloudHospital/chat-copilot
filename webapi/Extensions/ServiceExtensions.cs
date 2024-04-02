@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
-using System.Text;
 using CopilotChat.Shared;
 using CopilotChat.WebApi.Auth;
 using CopilotChat.WebApi.Configuration;
@@ -15,22 +14,17 @@ using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
 using CopilotChat.WebApi.Utilities;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
-using Microsoft.Azure.Cosmos.Core;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.KernelMemory;
 using Microsoft.KernelMemory.Diagnostics;
 
@@ -306,21 +300,21 @@ public static class CopilotChatServiceExtensions
                     options.Audience = copliotApiConfiguration?.OidcApiName;
                 })
                 //.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme)
-                //.AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
-                //{
-                //    options.Authority = config.Identity?.ApiBaseUrl;
-                //    options.ClientId = config.Identity?.ClientId;
-                //    options.ClientSecret = config.Identity?.ClientSecret;
-                //    options.SaveTokens = true;
-                //    options.GetClaimsFromUserInfoEndpoint = true;
-                //    if (!string.IsNullOrWhiteSpace(config.Identity?.Scope))
-                //    {
-                //        foreach (string scope in config.Identity!.Scope.Split(' '))
-                //        {
-                //            options.Scope.Add(scope);
-                //        }
-                //    }
-                //})
+                .AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
+                {
+                    options.Authority = config.Identity?.ApiBaseUrl;
+                    options.ClientId = config.Identity?.ClientId;
+                    options.ClientSecret = config.Identity?.ClientSecret;
+                    options.SaveTokens = true;
+                    options.GetClaimsFromUserInfoEndpoint = true;
+                    if (!string.IsNullOrWhiteSpace(config.Identity?.Scope))
+                    {
+                        foreach (string scope in config.Identity!.Scope.Split(' '))
+                        {
+                            options.Scope.Add(scope);
+                        }
+                    }
+                })
                 ;
                 break;
             case ChatAuthenticationOptions.AuthenticationType.None:

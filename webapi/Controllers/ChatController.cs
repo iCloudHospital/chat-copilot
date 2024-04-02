@@ -30,6 +30,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
 using Microsoft.SemanticKernel.Plugins.MsGraph;
 using Microsoft.SemanticKernel.Plugins.MsGraph.Connectors;
 using Microsoft.SemanticKernel.Plugins.MsGraph.Connectors.Client;
@@ -68,6 +70,65 @@ public class ChatController : ControllerBase, IDisposable
         this._disposables = new List<IDisposable>();
         this._serviceOptions = serviceOptions.Value;
         this._plugins = plugins;
+    }
+
+    [Route("chats/single")]
+    [HttpPost]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status504GatewayTimeout)]
+    public async Task<IActionResult> SingleChatAsync(
+        [FromServices] IHubContext<MessageRelayHub> messageRelayHubContext,
+        [FromServices] ChatSessionRepository chatSessionRepository,
+        [FromServices] ChatParticipantRepository chatParticipantRepository,
+        [FromServices] IAuthInfo authInfo,
+        [FromBody] Ask ask)
+    {
+        var builder = Kernel.CreateBuilder();
+        builder.AddAzureOpenAIChatCompletion("gpt-4", //gpt-35-turbo
+              "https://chopenaiservice.openai.azure.com/",
+              "91d7d187370c42c5bab250869460097c"
+              );
+        builder.Plugins.AddFromType<UserInfo>();
+        var kernel = builder.Build();
+
+        ChatHistory history = new ChatHistory();
+        history.AddSystemMessage(@"You're a virtual assistant that helps people find information.");
+
+
+        var chatCompletionService = kernel.GetRequiredService<IChatCompletionService>();
+
+        string combinedResponse = string.Empty;
+
+        history.AddUserMessage(ask.Input);
+
+        OpenAIPromptExecutionSettings openAIPromptExecutionSettings = new()
+        {
+            MaxTokens = 4096,
+            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
+        };
+
+        var response = chatCompletionService.GetStreamingChatMessageContentsAsync(
+                       history,
+                       executionSettings: openAIPromptExecutionSettings,
+                       kernel: kernel);
+
+        await foreach (var message in response)
+        {
+            combinedResponse += message;
+        }
+
+        history.AddAssistantMessage(combinedResponse);
+
+        AskResult chatAskResult = new()
+        {
+            Value = combinedResponse,
+            Variables = null
+        };
+
+        return this.Ok(chatAskResult);
     }
 
     /// <summary>
@@ -128,12 +189,14 @@ public class ChatController : ControllerBase, IDisposable
 
         // Run the function.
         FunctionResult? result = null;
+
         try
         {
             using CancellationTokenSource? cts = this._serviceOptions.TimeoutLimitInS is not null
                 // Create a cancellation token source with the timeout if specified
                 ? new CancellationTokenSource(TimeSpan.FromSeconds((double)this._serviceOptions.TimeoutLimitInS))
                 : null;
+
 
             result = await kernel.InvokeAsync(chatFunction!, contextVariables, cts?.Token ?? default);
             this._telemetryService.TrackPluginFunction(ChatPluginName, ChatFunctionName, true);
@@ -159,7 +222,7 @@ public class ChatController : ControllerBase, IDisposable
         };
 
         // Broadcast AskResult to all users
-        await messageRelayHubContext.Clients.Group(chatIdString).SendAsync(GeneratingResponseClientCall, chatIdString, null);
+        await messageRelayHubContext.Clients.Group(chatIdString).SendAsync(GeneratingResponseClientCall, chatIdString, "", chatAskResult.Value);
 
         return this.Ok(chatAskResult);
     }
@@ -221,6 +284,8 @@ public class ChatController : ControllerBase, IDisposable
             tasks.AddRange(this.RegisterCustomPlugins(kernel, customPluginsString, authHeaders));
         }
 
+        tasks.Add(this.RegisterUserinfo(kernel));
+
         await Task.WhenAll(tasks);
     }
 
@@ -235,6 +300,12 @@ public class ChatController : ControllerBase, IDisposable
             {
                 AuthCallback = authenticationProvider.AuthenticateRequestAsync,
             });
+    }
+
+    private async Task RegisterUserinfo(Kernel kernel)
+    {
+        this._logger.LogInformation("Enabling UserInfo plugin.");
+        await Task.Factory.StartNew(() => kernel.Plugins.AddFromType<UserInfo>(), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
     }
 
     private async Task RegisterJiraPlugin(Kernel kernel, string JiraAuthHeader, KernelArguments variables)
