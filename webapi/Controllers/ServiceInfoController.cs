@@ -128,7 +128,7 @@ public class ServiceInfoController : ControllerBase
         var config = new FrontendAuthConfig
         {
             AuthType = this._chatAuthenticationOptions.Type.ToString(),
-            AadAuthority = this._chatAuthenticationOptions.Identity!.ApiBaseUrl,
+            AadAuthority = this._chatAuthenticationOptions.Identity!.BaseUrl,
             AadClientId = this._chatAuthenticationOptions.Identity!.ClientId,
             AadApiScope = this._copilotApiConfiguration.OidcApiName
         };

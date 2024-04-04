@@ -23,6 +23,8 @@ public class CopilotApiConfiguration
     public string ManagerRole { get; set; }
     public string LocalManagerRole { get; set; }
 
+    public string DoctorRole { get; set; }
+
     public bool CorsAllowAnyOrigin { get; set; }
 
     public string[] CorsAllowOrigins { get; set; }

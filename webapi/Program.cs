@@ -1,6 +1,4 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
-
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
@@ -10,16 +8,18 @@ using System.Threading.Tasks;
 using CopilotChat.WebApi.Configuration;
 using CopilotChat.WebApi.Configuration.Authorization;
 using CopilotChat.WebApi.Extensions;
+using CopilotChat.WebApi.Helpers;
 using CopilotChat.WebApi.Hubs;
 using CopilotChat.WebApi.Services;
-using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.ApplicationInsights.Extensibility.Implementation;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -28,44 +28,46 @@ using Microsoft.OpenApi.Models;
 
 namespace CopilotChat.WebApi;
 
-/// <summary>
-/// Chat Copilot Service
-/// </summary>
 public sealed class Program
 {
-    /// <summary>
-    /// Entry point
-    /// </summary>
-    /// <param name="args">Web application command-line arguments.</param>
-    // ReSharper disable once InconsistentNaming
     public static async Task Main(string[] args)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
         JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 
-        // Load in configuration settings from appsettings.json, user-secrets, key vaults, etc...
-        builder.Host.AddConfiguration();
-        builder.WebHost.UseUrls(); // Disables endpoint override warning message when using IConfiguration for Kestrel endpoint.
+        CopilotApiConfiguration copliotApiConfiguration = ((IConfiguration)builder.Configuration).GetSection(nameof(CopilotApiConfiguration)).Get<CopilotApiConfiguration>() ?? new CopilotApiConfiguration();
+        builder.Services.AddSingleton(copliotApiConfiguration);
 
-        // Add in configuration options and required services.
+        builder.Host.AddConfiguration();
+        builder.WebHost.UseUrls();
+
         builder.Services
-            .AddSingleton<ILogger>(sp => sp.GetRequiredService<ILogger<Program>>()) // some services require an un-templated ILogger
+            .AddSingleton<ILogger>(sp => sp.GetRequiredService<ILogger<Program>>())
             .AddOptions(builder.Configuration)
             .AddPersistentChatStore()
             .AddPlugins(builder.Configuration)
             .AddChatCopilotAuthentication(builder.Configuration)
             .AddChatCopilotAuthorization();
 
-        // Configure and add semantic services
         builder
             .AddBotConfig()
             .AddSemanticKernelServices()
             .AddSemanticMemoryServices();
 
-        // Add SignalR as the real time relay service
         builder.Services.AddSignalR();
 
-        // Add AppInsights telemetry
+        DatabaseConnectionStrings databaseConnectionStrings = ((IConfiguration)builder.Configuration).GetSection("ConnectionStrings").Get<DatabaseConnectionStrings>() ?? new DatabaseConnectionStrings();
+        builder.Services.AddDbContext<CopilotDbContext>(delegate (DbContextOptionsBuilder options)
+        {
+            options.UseSqlServer(databaseConnectionStrings.CurrentSiteConnectionString, delegate (SqlServerDbContextOptionsBuilder sql)
+            {
+                sql.MigrationsAssembly(typeof(CopilotDbContext).Assembly.FullName);
+            });
+        });
+
+        //builder.Services.AddTransient<IUserValidator<UserIdentity>, OptionalEmailUserValidator<UserIdentity>>();
+        //builder.Services.AddApiAuthentication<CopilotDbContext, UserIdentity, IdentityRole>(builder.Configuration);
+
         builder.Services
             .AddHttpContextAccessor()
             .AddApplicationInsightsTelemetry(options => { options.ConnectionString = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]; })
@@ -75,11 +77,7 @@ public sealed class Program
 
         TelemetryDebugWriter.IsTracingDisabled = Debugger.IsAttached;
 
-        // Add named HTTP clients for IHttpClientFactory
         builder.Services.AddHttpClient();
-
-        CopilotApiConfiguration copliotApiConfiguration = ((IConfiguration)builder.Configuration).GetSection(nameof(CopilotApiConfiguration)).Get<CopilotApiConfiguration>() ?? new CopilotApiConfiguration();
-        builder.Services.AddSingleton(copliotApiConfiguration);
 
         builder.Services.AddSwaggerGen(options =>
         {
@@ -106,9 +104,9 @@ public sealed class Program
         });
 
 
-        // Add in the rest of the services.
         builder.Services
             .AddMaintenanceServices()
+            .AddDistributedMemoryCache()
             .AddEndpointsApiExplorer()
             .AddCorsPolicy(builder.Configuration)
             .AddControllers()
@@ -116,16 +114,14 @@ public sealed class Program
             {
                 options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
             });
-        builder.Services.AddHealthChecks();
+        builder.Services.AddSession().AddHealthChecks();
 
-        // Configure middleware and endpoints
         WebApplication app = builder.Build();
-
         app.AddForwardHeaders();
-
         app.UseDefaultFiles();
         app.UseStaticFiles();
         app.UseCors();
+        app.UseSession();
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseMiddleware<MaintenanceMiddleware>();
@@ -133,23 +129,19 @@ public sealed class Program
             .RequireAuthorization();
         app.MapHealthChecks("/healthz");
 
-        // Add Chat Copilot hub for real time communication
         app.MapHub<MessageRelayHub>("/messageRelayHub");
 
-        // Enable Swagger for development environments.
         if (app.Environment.IsDevelopment())
         {
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
                 c.SwaggerEndpoint($"{copliotApiConfiguration?.ApiBaseUrl}/swagger/v1/swagger.json", copliotApiConfiguration?.ApiName);
-
                 c.OAuthClientId(copliotApiConfiguration?.OidcSwaggerUIClientId);
                 c.OAuthAppName(copliotApiConfiguration?.ApiName);
                 c.OAuthUsePkce();
             });
 
-            // Redirect root URL to Swagger UI URL
             app.MapWhen(
                 context => context.Request.Path == "/",
                 appBuilder =>
@@ -157,10 +149,10 @@ public sealed class Program
                         async context => await Task.Run(() => context.Response.Redirect("/swagger"))));
         }
 
-        // Start the service
+        app.Services.DbRegistration();
+
         Task runTask = app.RunAsync();
 
-        // Log the health probe URL for users to validate the service is running.
         try
         {
             string? address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault();
@@ -168,10 +160,9 @@ public sealed class Program
         }
         catch (ObjectDisposedException)
         {
-            // We likely failed startup which disposes 'app.Services' - don't attempt to display the health probe URL.
         }
 
-        // Wait for the service to complete.
         await runTask;
     }
+
 }

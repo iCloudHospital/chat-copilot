@@ -72,7 +72,7 @@ public class ChatAuthenticationOptions
         public string ClientSecret { get; set; } = string.Empty;
 
         [Required, NotEmptyOrWhitespace]
-        public string ApiBaseUrl { get; set; } = string.Empty;
+        public string BaseUrl { get; set; } = string.Empty;
 
         public string? Scope { get; set; } = string.Empty;
     }

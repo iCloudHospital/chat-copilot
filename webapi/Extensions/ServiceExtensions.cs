@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Claims;
 using CopilotChat.Shared;
 using CopilotChat.WebApi.Auth;
 using CopilotChat.WebApi.Configuration;
@@ -13,13 +14,16 @@ using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
 using CopilotChat.WebApi.Utilities;
+using IdentityModel;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -251,6 +255,8 @@ public static class CopilotChatServiceExtensions
     /// </summary>
     public static IServiceCollection AddChatCopilotAuthorization(this IServiceCollection services)
     {
+        var copilotApiConfiguration = services.BuildServiceProvider().GetService<CopilotApiConfiguration>();
+
         return services.AddScoped<IAuthorizationHandler, ChatParticipantAuthorizationHandler>()
             .AddAuthorizationCore(options =>
             {
@@ -262,6 +268,95 @@ public static class CopilotChatServiceExtensions
                     builder.RequireAuthenticatedUser()
                         .AddRequirements(new ChatParticipantRequirement());
                 });
+
+                options.AddPolicy(AuthorizationConsts.AdministrationPolicy,
+                    policy =>
+                        policy.RequireAssertion(context => {
+                            if (context.User.HasClaim(c => c.Type == JwtClaimTypes.Scope && c.Value == copilotApiConfiguration.OidcApiName))
+                            {
+                                if (context.User.HasClaim(c => (c.Type == JwtClaimTypes.Role && c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+
+                                if (context.User.HasClaim(c => (c.Type == ClaimTypes.Role && c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+
+                                if (context.User.HasClaim(c => (c.Type == $"client_{JwtClaimTypes.Role}" && c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }));
+                options.AddPolicy(AuthorizationConsts.ManagerPolicy,
+                    policy =>
+                        policy.RequireAssertion(context => {
+                            if (context.User.HasClaim(c => c.Type == JwtClaimTypes.Scope && c.Value == copilotApiConfiguration.OidcApiName))
+                            {
+                                if (context.User.HasClaim(c => (c.Type == JwtClaimTypes.Role && c.Value == copilotApiConfiguration.ManagerRole || c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+
+                                if (context.User.HasClaim(c => (c.Type == ClaimTypes.Role && c.Value == copilotApiConfiguration.ManagerRole || c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+
+                                if (context.User.HasClaim(c => (c.Type == $"client_{JwtClaimTypes.Role}" && c.Value == copilotApiConfiguration.ManagerRole || c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }));
+                options.AddPolicy(AuthorizationConsts.LocalManagerPolicy,
+                    policy =>
+                        policy.RequireAssertion(context => {
+                            if (context.User.HasClaim(c => c.Type == JwtClaimTypes.Scope && c.Value == copilotApiConfiguration.OidcApiName))
+                            {
+                                if (context.User.HasClaim(c => (c.Type == JwtClaimTypes.Role && c.Value == copilotApiConfiguration.LocalManagerRole || c.Value == copilotApiConfiguration.ManagerRole || c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+
+                                if (context.User.HasClaim(c => (c.Type == ClaimTypes.Role && c.Value == copilotApiConfiguration.LocalManagerRole || c.Value == copilotApiConfiguration.ManagerRole || c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+
+                                if (context.User.HasClaim(c => (c.Type == $"client_{JwtClaimTypes.Role}" && c.Value == copilotApiConfiguration.LocalManagerRole || c.Value == copilotApiConfiguration.ManagerRole || c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }));
+                options.AddPolicy(AuthorizationConsts.DoctorPolicy,
+                    policy =>
+                        policy.RequireAssertion(context => {
+                            if (context.User.HasClaim(c => c.Type == JwtClaimTypes.Scope && c.Value == copilotApiConfiguration.OidcApiName))
+                            {
+                                if (context.User.HasClaim(c => (c.Type == JwtClaimTypes.Role && c.Value == copilotApiConfiguration.DoctorRole || c.Value == copilotApiConfiguration.LocalManagerRole || c.Value == copilotApiConfiguration.ManagerRole || c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+
+                                if (context.User.HasClaim(c => (c.Type == ClaimTypes.Role && c.Value == copilotApiConfiguration.DoctorRole || c.Value == copilotApiConfiguration.LocalManagerRole || c.Value == copilotApiConfiguration.ManagerRole || c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+
+                                if (context.User.HasClaim(c => (c.Type == $"client_{JwtClaimTypes.Role}" && c.Value == copilotApiConfiguration.DoctorRole || c.Value == copilotApiConfiguration.LocalManagerRole || c.Value == copilotApiConfiguration.ManagerRole || c.Value == copilotApiConfiguration.AdministrationRole)))
+                                {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }));
             });
     }
 
@@ -284,7 +379,6 @@ public static class CopilotChatServiceExtensions
                 break;
             case ChatAuthenticationOptions.AuthenticationType.Identity:
                 //services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-
                 services.AddAuthentication(options =>
                 {
                     options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -302,7 +396,7 @@ public static class CopilotChatServiceExtensions
                 //.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme)
                 .AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
                 {
-                    options.Authority = config.Identity?.ApiBaseUrl;
+                    options.Authority = config.Identity?.BaseUrl;
                     options.ClientId = config.Identity?.ClientId;
                     options.ClientSecret = config.Identity?.ClientSecret;
                     options.SaveTokens = true;
@@ -394,5 +488,30 @@ public static class CopilotChatServiceExtensions
         forwardingOptions.KnownProxies.Clear();
 
         app.UseForwardedHeaders(forwardingOptions);
+    }
+
+    public static void AddApiAuthentication<TIdentityDbContext, TUser, TRole>(this IServiceCollection services,
+    IConfiguration configuration)
+    where TIdentityDbContext : DbContext
+    where TRole : class
+    where TUser : class
+    {
+        var copilotApiConfiguration = configuration.GetSection(nameof(CopilotApiConfiguration)).Get<CopilotApiConfiguration>();
+        var identityOptions = configuration.GetSection(nameof(IdentityOptions)).Get<IdentityOptions>();
+
+        services
+            .AddSingleton(identityOptions)
+            .AddIdentity<UserIdentity, IdentityRole>(options => configuration.GetSection(nameof(IdentityOptions)).Bind(options))
+            .AddEntityFrameworkStores<TIdentityDbContext>()
+            .AddDefaultTokenProviders();
+    }
+
+    public static void DbRegistration(this IServiceProvider services)
+    {
+        using (var serviceScope = services.CreateScope())
+        {
+            var dbContext = serviceScope.ServiceProvider.GetRequiredService<CopilotDbContext>();
+            dbContext.Database.Migrate();
+        }
     }
 }

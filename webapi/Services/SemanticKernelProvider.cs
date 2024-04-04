@@ -78,13 +78,13 @@ buildStart:
                     httpClient: httpClientFactory.CreateClient()
                     );
 
-                //builder.AddAzureOpenAIChatCompletion(
-                //    "gpt-35-turbo",
-                //    azureAIOptions.Endpoint,
-                //    azureAIOptions.APIKey,
-                //    serviceId: "hospitalName",
-                //    httpClient: httpClientFactory.CreateClient()
-                //    );
+                builder.AddAzureOpenAIChatCompletion(
+                    "gpt-35-turbo",
+                    azureAIOptions.Endpoint,
+                    azureAIOptions.APIKey,
+                    serviceId: "hospitalName",
+                    httpClient: httpClientFactory.CreateClient()
+                    );
                 break;
                 
 
