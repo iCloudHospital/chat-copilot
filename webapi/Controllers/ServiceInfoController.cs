@@ -92,6 +92,22 @@ public class ServiceInfoController : ControllerBase
         string userid = this.User.FindFirst("sub")?.Value ?? "";
         var token = await this.HttpContext.GetTokenAsync("access_token");
 
+        var authorizationHeaderValueTokens = this.HttpContext.Request.Headers.Authorization.ToString().Split(' ');
+        if (authorizationHeaderValueTokens is not null && authorizationHeaderValueTokens.Any())
+        {
+            var schema = authorizationHeaderValueTokens.FirstOrDefault();
+            var accessToken = authorizationHeaderValueTokens.LastOrDefault();
+
+            if (!string.IsNullOrWhiteSpace(schema) && schema.Equals("Bearer", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(accessToken))
+            {
+                return this.Ok(new
+                {
+                    id = userid,
+                    token = accessToken,
+                });
+            }
+
+        }
         return this.Ok(new { id = userid, token = token });
     }
 
@@ -105,7 +121,7 @@ public class ServiceInfoController : ControllerBase
     [AllowAnonymous]
     public IActionResult GetAuthConfig()
     {
-        /*
+        
         string authorityUriString = string.Empty;
 
         if (!string.IsNullOrEmpty(this._chatAuthenticationOptions.AzureAd!.Instance) &&
@@ -123,8 +139,8 @@ public class ServiceInfoController : ControllerBase
             AadClientId = this._frontendOptions.AadClientId,
             AadApiScope = $"api://{this._chatAuthenticationOptions.AzureAd!.ClientId}/{this._chatAuthenticationOptions.AzureAd!.Scopes}",
         };
-        */
-
+        
+        /*
         var config = new FrontendAuthConfig
         {
             AuthType = this._chatAuthenticationOptions.Type.ToString(),
@@ -132,6 +148,7 @@ public class ServiceInfoController : ControllerBase
             AadClientId = this._chatAuthenticationOptions.Identity!.ClientId,
             AadApiScope = this._copilotApiConfiguration.OidcApiName
         };
+        */
 
         return this.Ok(config);
     }

@@ -13,7 +13,7 @@ namespace CopilotChat.WebApi.Models.Storage;
 /// <summary>
 /// Information about a single chat message.
 /// </summary>
-public class CopilotChatMessage : IStorageEntity
+public class CopilotChatMessage : IchMessageBase, IStorageEntity
 {
     private static readonly JsonSerializerOptions SerializerSettings = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -115,6 +115,7 @@ public class CopilotChatMessage : IStorageEntity
     /// </summary>
     [JsonIgnore]
     public string Partition => this.ChatId;
+
 
     /// <summary>
     /// Create a new chat message. Timestamp is automatically generated.

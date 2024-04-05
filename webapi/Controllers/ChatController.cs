@@ -93,7 +93,7 @@ public class ChatController : ControllerBase, IDisposable
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status504GatewayTimeout)]
-    [Authorize]
+    [Authorize(Policy = AuthorizationConsts.DoctorPolicy)]
     public async Task<IActionResult> ChatAsync(
         [FromServices] Kernel kernel,
         [FromServices] IHubContext<MessageRelayHub> messageRelayHubContext,
@@ -104,8 +104,6 @@ public class ChatController : ControllerBase, IDisposable
         [FromRoute] Guid chatId)
     {
         this._logger.LogDebug("Chat message received.");
-
-        this._logger.LogDebug($"User : {this.User}");
 
         string chatIdString = chatId.ToString();
 
@@ -122,6 +120,100 @@ public class ChatController : ControllerBase, IDisposable
         if (!(await chatParticipantRepository.IsUserInChatAsync(authInfo.UserId, chatIdString)))
         {
             return this.Forbid("User does not have access to the chatId specified in variables.");
+        }
+
+
+        // Register plugins that have been enabled
+        var openApiPluginAuthHeaders = this.GetPluginAuthHeaders(this.HttpContext.Request.Headers);
+        await this.RegisterFunctionsAsync(kernel, openApiPluginAuthHeaders, contextVariables);
+
+        // Register hosted plugins that have been enabled
+        await this.RegisterHostedFunctionsAsync(kernel, chat!.EnabledPlugins);
+
+        // Get the function to invoke
+        KernelFunction? chatFunction = kernel.Plugins.GetFunction(ChatPluginName, ChatFunctionName);
+
+        // Run the function.
+        FunctionResult? result = null;
+
+        try
+        {
+            using CancellationTokenSource? cts = this._serviceOptions.TimeoutLimitInS is not null
+                // Create a cancellation token source with the timeout if specified
+                ? new CancellationTokenSource(TimeSpan.FromSeconds((double)this._serviceOptions.TimeoutLimitInS))
+                : null;
+
+
+            result = await kernel.InvokeAsync(chatFunction!, contextVariables, cts?.Token ?? default);
+            this._telemetryService.TrackPluginFunction(ChatPluginName, ChatFunctionName, true);
+        }
+        catch (Exception ex)
+        {
+            if (ex is OperationCanceledException || ex.InnerException is OperationCanceledException)
+            {
+                // Log the timeout and return a 504 response
+                this._logger.LogError("The {FunctionName} operation timed out.", ChatFunctionName);
+                return this.StatusCode(StatusCodes.Status504GatewayTimeout, $"The chat {ChatFunctionName} timed out.");
+            }
+
+            this._telemetryService.TrackPluginFunction(ChatPluginName, ChatFunctionName, false);
+
+            throw;
+        }
+
+        AskResult chatAskResult = new()
+        {
+            Value = result.ToString() ?? string.Empty,
+            Variables = contextVariables.Select(v => new KeyValuePair<string, object?>(v.Key, v.Value))
+        };
+
+        // Broadcast AskResult to all users
+        await messageRelayHubContext.Clients.Group(chatIdString).SendAsync(GeneratingResponseClientCall, chatIdString, "", chatAskResult.Value);
+
+        return this.Ok(chatAskResult);
+    }
+
+    [Route("chats/{chatId:guid}/{hospitalid:guid}/messages")]
+    [HttpPost]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status504GatewayTimeout)]
+    [Authorize(Policy = AuthorizationConsts.DoctorPolicy)]
+    public async Task<IActionResult> ChatAsync(
+    [FromServices] Kernel kernel,
+    [FromServices] IHubContext<MessageRelayHub> messageRelayHubContext,
+    [FromServices] ChatSessionRepository chatSessionRepository,
+    [FromServices] ChatParticipantRepository chatParticipantRepository,
+    [FromServices] IAuthInfo authInfo,
+    [FromBody] Ask ask,
+    [FromRoute] Guid chatId,
+    [FromRoute] Guid hospitalid)
+    {
+        this._logger.LogDebug("Chat message received.");
+
+        string chatIdString = chatId.ToString();
+        string hospitalIdString = hospitalid.ToString();
+
+        // Put ask's variables in the context we will use.
+        var contextVariables = GetContextVariables(ask, authInfo, chatIdString);
+
+        // Verify that the chat exists and that the user has access to it.
+        ChatSession? chat = null;
+        if (!(await chatSessionRepository.TryFindByIdAsync(chatIdString, callback: c => chat = c)))
+        {
+            return this.NotFound("Failed to find chat session for the chatId specified in variables.");
+        }
+
+        if (!(await chatParticipantRepository.IsUserInChatAsync(authInfo.UserId, chatIdString)))
+        {
+            return this.Forbid("User does not have access to the chatId specified in variables.");
+        }
+
+        if (chat != null)
+        {
+            chat.HospitalID = hospitalIdString;
         }
 
         // Register plugins that have been enabled
@@ -231,7 +323,7 @@ public class ChatController : ControllerBase, IDisposable
             tasks.AddRange(this.RegisterCustomPlugins(kernel, customPluginsString, authHeaders));
         }
 
-        tasks.Add(this.RegisterUserinfo(kernel));
+        //tasks.Add(this.RegisterUserinfo(kernel));
 
         await Task.WhenAll(tasks);
     }

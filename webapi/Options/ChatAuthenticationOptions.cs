@@ -14,15 +14,15 @@ public class ChatAuthenticationOptions
     public enum AuthenticationType
     {
         None,
-        AzureAd,
-        Identity
+        AzureAd
+        //,Identity
     }
 
     /// <summary>
     /// Type of authentication.
     /// </summary>
     [Required]
-    public AuthenticationType Type { get; set; } = AuthenticationType.Identity;
+    public AuthenticationType Type { get; set; } = AuthenticationType.None;
 
     /// <summary>
     /// When <see cref="Type"/> is <see cref="AuthenticationType.AzureAd"/>, these are the Azure AD options to use.
@@ -30,8 +30,8 @@ public class ChatAuthenticationOptions
     [RequiredOnPropertyValue(nameof(Type), AuthenticationType.AzureAd)]
     public AzureAdOptions? AzureAd { get; set; }
 
-    [RequiredOnPropertyValue(nameof(Type), AuthenticationType.Identity)]
-    public IdentityOptions? Identity { get; set; }
+    //[RequiredOnPropertyValue(nameof(Type), AuthenticationType.Identity)]
+    //public IdentityOptions? Identity { get; set; }
 
     /// <summary>
     /// Configuration options for Azure Active Directory (AAD) authorization.

@@ -377,40 +377,40 @@ public static class CopilotChatServiceExtensions
                 services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     .AddMicrosoftIdentityWebApi(configuration.GetSection($"{ChatAuthenticationOptions.PropertyName}:AzureAd"));
                 break;
-            case ChatAuthenticationOptions.AuthenticationType.Identity:
-                //services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                services.AddAuthentication(options =>
-                {
-                    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
-                    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-                    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-                    options.DefaultSignInScheme = JwtBearerDefaults.AuthenticationScheme;
-                    options.DefaultForbidScheme = JwtBearerDefaults.AuthenticationScheme;
-                })
-                .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-                {
-                    options.Authority = copliotApiConfiguration?.IdentityServerBaseUrl;
-                    options.RequireHttpsMetadata = copliotApiConfiguration?.RequireHttpsMetadata ?? true;
-                    options.Audience = copliotApiConfiguration?.OidcApiName;
-                })
-                //.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme)
-                .AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
-                {
-                    options.Authority = config.Identity?.BaseUrl;
-                    options.ClientId = config.Identity?.ClientId;
-                    options.ClientSecret = config.Identity?.ClientSecret;
-                    options.SaveTokens = true;
-                    options.GetClaimsFromUserInfoEndpoint = true;
-                    if (!string.IsNullOrWhiteSpace(config.Identity?.Scope))
-                    {
-                        foreach (string scope in config.Identity!.Scope.Split(' '))
-                        {
-                            options.Scope.Add(scope);
-                        }
-                    }
-                })
-                ;
-                break;
+            //case ChatAuthenticationOptions.AuthenticationType.Identity:
+            //    //services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            //    services.AddAuthentication(options =>
+            //    {
+            //        options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+            //        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+            //        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            //        options.DefaultSignInScheme = JwtBearerDefaults.AuthenticationScheme;
+            //        options.DefaultForbidScheme = JwtBearerDefaults.AuthenticationScheme;
+            //    })
+            //    .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+            //    {
+            //        options.Authority = copliotApiConfiguration?.IdentityServerBaseUrl;
+            //        options.RequireHttpsMetadata = copliotApiConfiguration?.RequireHttpsMetadata ?? true;
+            //        options.Audience = copliotApiConfiguration?.OidcApiName;
+            //    })
+            //    //.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme)
+            //    .AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
+            //    {
+            //        options.Authority = config.Identity?.BaseUrl;
+            //        options.ClientId = config.Identity?.ClientId;
+            //        options.ClientSecret = config.Identity?.ClientSecret;
+            //        options.SaveTokens = true;
+            //        options.GetClaimsFromUserInfoEndpoint = true;
+            //        if (!string.IsNullOrWhiteSpace(config.Identity?.Scope))
+            //        {
+            //            foreach (string scope in config.Identity!.Scope.Split(' '))
+            //            {
+            //                options.Scope.Add(scope);
+            //            }
+            //        }
+            //    })
+            //    ;
+            //    break;
             case ChatAuthenticationOptions.AuthenticationType.None:
                 services.AddAuthentication(PassThroughAuthenticationHandler.AuthenticationScheme)
                     .AddScheme<AuthenticationSchemeOptions, PassThroughAuthenticationHandler>(

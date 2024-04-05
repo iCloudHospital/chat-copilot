@@ -10,7 +10,7 @@ namespace CopilotChat.WebApi.Models.Storage;
 /// <summary>
 /// A chat session
 /// </summary>
-public class ChatSession : IStorageEntity
+public class ChatSession : IchMessageBase, IStorageEntity
 {
     private const string CurrentVersion = "2.0";
 
@@ -61,6 +61,7 @@ public class ChatSession : IStorageEntity
     /// </summary>
     [JsonIgnore]
     public string Partition => this.Id;
+
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatSession"/> class.

@@ -18,7 +18,7 @@ public enum MemorySourceType
 /// <summary>
 /// The external memory source.
 /// </summary>
-public class MemorySource : IStorageEntity
+public class MemorySource : IchMessageBase, IStorageEntity
 {
     /// <summary>
     /// Source ID that is persistent and unique.
@@ -80,6 +80,7 @@ public class MemorySource : IStorageEntity
     /// </summary>
     [JsonIgnore]
     public string Partition => this.ChatId;
+
 
     /// <summary>
     /// Empty constructor for serialization.

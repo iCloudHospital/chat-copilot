@@ -13,4 +13,6 @@ public interface IStorageEntity
     /// Partition key value.
     /// </summary>
     string Partition { get; }
+
+    string HospitalID { get; }
 }

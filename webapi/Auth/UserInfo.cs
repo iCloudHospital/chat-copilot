@@ -35,11 +35,11 @@ public class UserInfo
         string link = string.Empty;
         if (this.IsLoggedIn)
         {
-            link = "https://localhost:5001/logout";
+            link = "https://localhost:5001/Account/logout";
         }
         else
         {
-            link = "https://localhost:5001";
+            link = "https://localhost:5001/Account/Login";
         }
 
         return link;
