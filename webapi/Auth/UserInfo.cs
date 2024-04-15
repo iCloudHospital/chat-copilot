@@ -5,12 +5,22 @@ namespace CopilotChat.WebApi.Auth;
 
 public class UserInfo
 {
-    public UserInfo()
-    {
-        this.IsLoggedIn = true;
-    }
+    private readonly IAuthInfo _authInfo;
+
+    private readonly HospitalInfo _hospitalInfo;
 
     public bool IsLoggedIn { get; set; } = false;
+
+    public UserInfo(IAuthInfo authInfo, HospitalInfo hospital)
+    {
+        this._authInfo = authInfo;
+        this._hospitalInfo = hospital;
+
+        if (this._authInfo != null && !string.IsNullOrWhiteSpace(this._authInfo!.UserId))
+        {
+            this.IsLoggedIn = true;
+        }
+    }
 
 #pragma warning disable CA1024 // Use properties where appropriate
     [KernelFunction]
@@ -24,24 +34,42 @@ public class UserInfo
     [Description("Gets the my name of the login.")]
     public string GetName()
     {
-        return this.IsLoggedIn ? "parkheesung" : "required login";
+        return this.IsLoggedIn ? this._authInfo.Name : "required login";
     }
-#pragma warning restore CA1024 // Use properties where appropriate
 
     [KernelFunction]
-    [Description("Gets the login or logout.'")]
-    public string ChangeState(bool newState)
+    [Description("Required login")]
+    public string RequiredLogin()
     {
         string link = string.Empty;
         if (this.IsLoggedIn)
         {
-            link = "https://localhost:5001/Account/logout";
+            link = "Already your login.";
         }
         else
         {
-            link = "https://localhost:5001/Account/Login";
+            link = "<a href=\"https://localhost:5001/Account/Login\" target=\"_blank\">Login Page</a>";
         }
 
         return link;
     }
+
+    [KernelFunction]
+    [Description("Gets the logout")]
+    public string RequiredLogout()
+    {
+        string link = string.Empty;
+        if (this.IsLoggedIn)
+        {
+            link = "<a href=\"https://localhost:5001/Account/logout\" target=\"_blank\">Logout Page</a>";
+        }
+        else
+        {
+            link = "Already yoiur logout.";
+        }
+
+        return link;
+    }
+
+#pragma warning restore CA1024 // Use properties where appropriate
 }

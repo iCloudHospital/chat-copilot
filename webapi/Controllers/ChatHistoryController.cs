@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CopilotChat.WebApi.Auth;
+using CopilotChat.WebApi.Configuration;
 using CopilotChat.WebApi.Extensions;
 using CopilotChat.WebApi.Hubs;
 using CopilotChat.WebApi.Models.Request;
@@ -29,7 +30,7 @@ namespace CopilotChat.WebApi.Controllers;
 /// This controller is responsible for creating new chat sessions, retrieving chat sessions,
 /// retrieving chat messages, and editing chat sessions.
 /// </summary>
-[AllowAnonymous]
+[Authorize(Policy = AuthorizationConsts.DoctorPolicy)]
 [ApiController]
 public class ChatHistoryController : ControllerBase
 {

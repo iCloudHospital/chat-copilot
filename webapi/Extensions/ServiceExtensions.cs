@@ -21,6 +21,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -257,7 +258,7 @@ public static class CopilotChatServiceExtensions
     {
         var copilotApiConfiguration = services.BuildServiceProvider().GetService<CopilotApiConfiguration>();
 
-        return services.AddScoped<IAuthorizationHandler, ChatParticipantAuthorizationHandler>()
+        return services //.AddScoped<IAuthorizationHandler, ChatParticipantAuthorizationHandler>()
             .AddAuthorizationCore(options =>
             {
                 options.DefaultPolicy = new AuthorizationPolicyBuilder()
@@ -363,9 +364,11 @@ public static class CopilotChatServiceExtensions
     /// <summary>
     /// Add authentication services
     /// </summary>
-    public static IServiceCollection AddChatCopilotAuthentication(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddChatCopilotAuthentication(this IServiceCollection services, IConfiguration configuration, IHttpContextAccessor _httpContextAccessor)
     {
-        services.AddScoped<IAuthInfo, AuthInfo>();
+        //services.AddScoped<IAuthInfo, AuthInfo>();
+
+        services.AddScoped<IAuthInfo>(_ => new AuthInfo(_httpContextAccessor));
 
         var copliotApiConfiguration = configuration.GetSection(nameof(CopilotApiConfiguration)).Get<CopilotApiConfiguration>();
         var config = services.BuildServiceProvider().GetRequiredService<IOptions<ChatAuthenticationOptions>>().Value;
@@ -412,10 +415,19 @@ public static class CopilotChatServiceExtensions
             //    ;
             //    break;
             case ChatAuthenticationOptions.AuthenticationType.None:
-                services.AddAuthentication(PassThroughAuthenticationHandler.AuthenticationScheme)
-                    .AddScheme<AuthenticationSchemeOptions, PassThroughAuthenticationHandler>(
-                        authenticationScheme: PassThroughAuthenticationHandler.AuthenticationScheme,
-                        configureOptions: null);
+                //services.AddAuthentication(PassThroughAuthenticationHandler.AuthenticationScheme)
+                //    .AddScheme<AuthenticationSchemeOptions, PassThroughAuthenticationHandler>(
+                //        authenticationScheme: PassThroughAuthenticationHandler.AuthenticationScheme,
+                //        configureOptions: null);
+
+                services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                    .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+                    {
+                        options.Authority = copliotApiConfiguration?.IdentityServerBaseUrl;
+                        options.RequireHttpsMetadata = copliotApiConfiguration?.RequireHttpsMetadata ?? true;
+                        options.Audience = copliotApiConfiguration?.OidcApiName;
+                    })
+                    .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme);
                 break;
 
             default:

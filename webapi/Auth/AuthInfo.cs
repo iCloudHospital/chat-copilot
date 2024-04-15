@@ -63,4 +63,5 @@ public class AuthInfo : IAuthInfo
     /// The authenticated user's name.
     /// </summary>
     public string Name => this._data.Value.UserName;
+
 }

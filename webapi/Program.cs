@@ -9,6 +9,7 @@ using CopilotChat.WebApi.Configuration;
 using CopilotChat.WebApi.Configuration.Authorization;
 using CopilotChat.WebApi.Extensions;
 using CopilotChat.WebApi.Hubs;
+using CopilotChat.WebApi.Search;
 using CopilotChat.WebApi.Services;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.ApplicationInsights.Extensibility.Implementation;
@@ -16,6 +17,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
@@ -33,6 +35,8 @@ public sealed class Program
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
         JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 
+        IHttpContextAccessor httpContextAccessor = new HttpContextAccessor();
+
         CopilotApiConfiguration copliotApiConfiguration = ((IConfiguration)builder.Configuration).GetSection(nameof(CopilotApiConfiguration)).Get<CopilotApiConfiguration>() ?? new CopilotApiConfiguration();
         builder.Services.AddSingleton(copliotApiConfiguration);
 
@@ -44,7 +48,7 @@ public sealed class Program
             .AddOptions(builder.Configuration)
             .AddPersistentChatStore()
             .AddPlugins(builder.Configuration)
-            .AddChatCopilotAuthentication(builder.Configuration)
+            .AddChatCopilotAuthentication(builder.Configuration, httpContextAccessor)
             .AddChatCopilotAuthorization();
 
         builder
@@ -101,6 +105,8 @@ public sealed class Program
 
         });
 
+
+        builder.Services.AddScoped<ISearchConnector, SearchConnector>();
 
         builder.Services
             .AddMaintenanceServices()

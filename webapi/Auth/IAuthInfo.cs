@@ -13,4 +13,6 @@ public interface IAuthInfo
     /// The authenticated user's name.
     /// </summary>
     public string Name { get; }
+
+
 }

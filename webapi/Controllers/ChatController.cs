@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -12,6 +13,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Azure;
 using CopilotChat.WebApi.Auth;
 using CopilotChat.WebApi.Configuration;
 using CopilotChat.WebApi.Hubs;
@@ -20,16 +22,20 @@ using CopilotChat.WebApi.Models.Response;
 using CopilotChat.WebApi.Models.Storage;
 using CopilotChat.WebApi.Options;
 using CopilotChat.WebApi.Plugins.Chat;
+using CopilotChat.WebApi.Search;
 using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
 using CopilotChat.WebApi.Utilities;
+using DocumentFormat.OpenXml.InkML;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
+using Microsoft.KernelMemory;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Plugins.MsGraph;
 using Microsoft.SemanticKernel.Plugins.MsGraph.Connectors;
@@ -52,6 +58,9 @@ public class ChatController : ControllerBase, IDisposable
     private readonly ServiceOptions _serviceOptions;
     private readonly IDictionary<string, Plugin> _plugins;
     private readonly CopilotApiConfiguration _copliotApiConfiguration;
+    private readonly IConfiguration Configuration;
+    private readonly KernelMemoryConfig memoryOptions;
+    private readonly ISearchConnector _searchConnector;
 
     private const string ChatPluginName = nameof(ChatPlugin);
     private const string ChatFunctionName = "Chat";
@@ -64,6 +73,9 @@ public class ChatController : ControllerBase, IDisposable
         ITelemetryService telemetryService,
         IOptions<ServiceOptions> serviceOptions,
         CopilotApiConfiguration copliotApiConfiguration,
+        IOptions<KernelMemoryConfig> memoryOptions,
+        IConfiguration configuration,
+        ISearchConnector searchConnector,
         IDictionary<string, Plugin> plugins)
     {
         this._logger = logger;
@@ -73,6 +85,9 @@ public class ChatController : ControllerBase, IDisposable
         this._serviceOptions = serviceOptions.Value;
         this._copliotApiConfiguration = copliotApiConfiguration;
         this._plugins = plugins;
+        this.Configuration = configuration;
+        this._searchConnector = searchConnector;
+        this.memoryOptions = memoryOptions.Value;
     }
 
     /// <summary>
@@ -105,10 +120,26 @@ public class ChatController : ControllerBase, IDisposable
     {
         this._logger.LogDebug("Chat message received.");
 
+        if (this.User != null)
+        {
+
+        }
+
+        
+
+        var response = new ServiceInfoResponse()
+        {
+            MemoryStore = new MemoryStoreInfoResponse()
+            {
+                Types = Enum.GetNames(typeof(MemoryStoreType)),
+                SelectedType = this.memoryOptions.GetMemoryStoreType(this.Configuration).ToString(),
+            }
+        };
+
         string chatIdString = chatId.ToString();
 
         // Put ask's variables in the context we will use.
-        var contextVariables = GetContextVariables(ask, authInfo, chatIdString);
+        var contextVariables = GetContextVariables(ask, authInfo, chatIdString, "");
 
         // Verify that the chat exists and that the user has access to it.
         ChatSession? chat = null;
@@ -125,13 +156,11 @@ public class ChatController : ControllerBase, IDisposable
 
         // Register plugins that have been enabled
         var openApiPluginAuthHeaders = this.GetPluginAuthHeaders(this.HttpContext.Request.Headers);
-        await this.RegisterFunctionsAsync(kernel, openApiPluginAuthHeaders, contextVariables);
+        var hospital = new HospitalInfo("");
+        await this.RegisterFunctionsAsync(kernel, openApiPluginAuthHeaders, contextVariables, authInfo, hospital);
 
         // Register hosted plugins that have been enabled
         await this.RegisterHostedFunctionsAsync(kernel, chat!.EnabledPlugins);
-
-        // Get the function to invoke
-        KernelFunction? chatFunction = kernel.Plugins.GetFunction(ChatPluginName, ChatFunctionName);
 
         // Run the function.
         FunctionResult? result = null;
@@ -143,6 +172,16 @@ public class ChatController : ControllerBase, IDisposable
                 ? new CancellationTokenSource(TimeSpan.FromSeconds((double)this._serviceOptions.TimeoutLimitInS))
                 : null;
 
+
+            if (this.memoryOptions.IsUseAzureAISearch(this.Configuration))
+            {
+                var kernelContext = new KernelContext(contextVariables, cts, response, this.Configuration);
+                this._searchConnector.SetContext(kernelContext);
+                var source = await this._searchConnector.SearchAsync("idx-hospital-dev", ask.Input);
+                await this.RegisterSearchResult(kernel, source);
+            }
+
+            KernelFunction? chatFunction = kernel.Plugins.GetFunction(ChatPluginName, ChatFunctionName);
 
             result = await kernel.InvokeAsync(chatFunction!, contextVariables, cts?.Token ?? default);
             this._telemetryService.TrackPluginFunction(ChatPluginName, ChatFunctionName, true);
@@ -197,7 +236,7 @@ public class ChatController : ControllerBase, IDisposable
         string hospitalIdString = hospitalid.ToString();
 
         // Put ask's variables in the context we will use.
-        var contextVariables = GetContextVariables(ask, authInfo, chatIdString);
+        var contextVariables = GetContextVariables(ask, authInfo, chatIdString, hospitalIdString);
 
         // Verify that the chat exists and that the user has access to it.
         ChatSession? chat = null;
@@ -218,7 +257,8 @@ public class ChatController : ControllerBase, IDisposable
 
         // Register plugins that have been enabled
         var openApiPluginAuthHeaders = this.GetPluginAuthHeaders(this.HttpContext.Request.Headers);
-        await this.RegisterFunctionsAsync(kernel, openApiPluginAuthHeaders, contextVariables);
+        var hospital = new HospitalInfo(hospitalIdString);
+        await this.RegisterFunctionsAsync(kernel, openApiPluginAuthHeaders, contextVariables, authInfo, hospital);
 
         // Register hosted plugins that have been enabled
         await this.RegisterHostedFunctionsAsync(kernel, chat!.EnabledPlugins);
@@ -235,7 +275,6 @@ public class ChatController : ControllerBase, IDisposable
                 // Create a cancellation token source with the timeout if specified
                 ? new CancellationTokenSource(TimeSpan.FromSeconds((double)this._serviceOptions.TimeoutLimitInS))
                 : null;
-
 
             result = await kernel.InvokeAsync(chatFunction!, contextVariables, cts?.Token ?? default);
             this._telemetryService.TrackPluginFunction(ChatPluginName, ChatFunctionName, true);
@@ -294,7 +333,7 @@ public class ChatController : ControllerBase, IDisposable
     /// <summary>
     /// Register functions with the kernel.
     /// </summary>
-    private async Task RegisterFunctionsAsync(Kernel kernel, Dictionary<string, string> authHeaders, KernelArguments variables)
+    private async Task RegisterFunctionsAsync(Kernel kernel, Dictionary<string, string> authHeaders, KernelArguments variables, IAuthInfo authInfo, HospitalInfo hospital)
     {
         // Register authenticated functions with the kernel only if the request includes an auth header for the plugin.
 
@@ -323,7 +362,7 @@ public class ChatController : ControllerBase, IDisposable
             tasks.AddRange(this.RegisterCustomPlugins(kernel, customPluginsString, authHeaders));
         }
 
-        //tasks.Add(this.RegisterUserinfo(kernel));
+        tasks.Add(this.RegisterUserinfo(kernel, authInfo, hospital));
 
         await Task.WhenAll(tasks);
     }
@@ -341,10 +380,20 @@ public class ChatController : ControllerBase, IDisposable
             });
     }
 
-    private async Task RegisterUserinfo(Kernel kernel)
+    private async Task RegisterUserinfo(Kernel kernel, IAuthInfo authInfo, HospitalInfo hospital)
     {
         this._logger.LogInformation("Enabling UserInfo plugin.");
-        await Task.Factory.StartNew(() => kernel.Plugins.AddFromType<UserInfo>(), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+        var user = new UserInfo(authInfo, hospital);
+        await Task.Factory.StartNew(() => kernel.Plugins.AddFromObject(user), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+        //await Task.Factory.StartNew(() => kernel.Plugins.AddFromType<UserInfo>(), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+    }
+
+    private async Task RegisterSearchResult(Kernel kernel, string source)
+    {
+        this._logger.LogInformation("Enabling Search plugin.");
+        var sp = new SearchPlugin(source);
+        await Task.Factory.StartNew(() => kernel.Plugins.AddFromObject(sp), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+        //await Task.Factory.StartNew(() => kernel.Plugins.AddFromType<UserInfo>(), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
     }
 
     private async Task RegisterJiraPlugin(Kernel kernel, string JiraAuthHeader, KernelArguments variables)
@@ -360,7 +409,7 @@ public class ChatController : ControllerBase, IDisposable
             {
                 AuthCallback = authenticationProvider.AuthenticateRequestAsync,
                 ServerUrlOverride = hasServerUrlOverride ? new Uri(serverUrlOverride!.ToString()!) : null,
-            }); ; ;
+            });
     }
 
     private Task RegisterMicrosoftGraphPlugins(Kernel kernel, string GraphAuthHeader)
@@ -470,12 +519,13 @@ public class ChatController : ControllerBase, IDisposable
         return;
     }
 
-    private static KernelArguments GetContextVariables(Ask ask, IAuthInfo authInfo, string chatId)
+    private static KernelArguments GetContextVariables(Ask ask, IAuthInfo authInfo, string chatId, string hospitalId)
     {
         const string UserIdKey = "userId";
         const string UserNameKey = "userName";
         const string ChatIdKey = "chatId";
         const string MessageKey = "message";
+        const string HospitalId = "hospitalId";
 
         var contextVariables = new KernelArguments();
         foreach (var variable in ask.Variables)
@@ -487,6 +537,7 @@ public class ChatController : ControllerBase, IDisposable
         contextVariables[UserNameKey] = authInfo.Name;
         contextVariables[ChatIdKey] = chatId;
         contextVariables[MessageKey] = ask.Input;
+        contextVariables[HospitalId] = hospitalId;
 
         return contextVariables;
     }
