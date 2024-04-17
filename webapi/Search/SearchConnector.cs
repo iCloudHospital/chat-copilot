@@ -2,11 +2,14 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Azure;
 using Azure.Search.Documents;
+using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
+using CopilotChat.WebApi.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.KernelMemory;
@@ -16,14 +19,30 @@ namespace CopilotChat.WebApi.Search;
 
 public class SearchConnector : ISearchConnector
 {
+    private readonly AzureSearchConfig _searchConfig;
     private readonly KernelMemoryConfig _memoriesStoreOptions;
     private readonly ILogger _logger;
     private KernelContext _context;
 
-    public SearchConnector(IOptions<KernelMemoryConfig> memoriesStoreOptions, ILogger<SearchConnector> logger)
+    private readonly Uri serviceEndpoint;
+    private readonly AzureKeyCredential credential;
+    private readonly SearchIndexClient indexClient;
+
+    private const string SpecialtyIndex = "idx-specialties-int";
+    private const string HospitalIndex = "idx-hospitals-int";
+
+
+    protected SearchOptions? searchOptions;
+
+    public SearchConnector(AzureSearchConfig searchConfig, IOptions<KernelMemoryConfig> memoriesStoreOptions, ILogger<SearchConnector> logger)
     {
+        this._searchConfig = searchConfig;
         this._memoriesStoreOptions = memoriesStoreOptions.Value;
         this._logger = logger;
+
+        this.serviceEndpoint = new Uri($"https://{this._searchConfig.SearchServiceName}.search.windows.net/");
+        this.credential = new AzureKeyCredential(this._searchConfig.SearchServiceQueryApiKey);
+        this.indexClient = new SearchIndexClient(this.serviceEndpoint, this.credential);
     }
 
     public void SetContext(KernelContext context)
@@ -31,52 +50,102 @@ public class SearchConnector : ISearchConnector
         this._context = context;
     }
 
-    public async Task<string> SearchAsync(string indexName, string query)
+    public async Task<List<string>> SpecialtySearchAsync(string query)
     {
         this._logger.LogDebug("Request search query: {0}", query);
 
-        var searchClient = this.CreateSearchClient(indexName);
+        var result = new List<string>();
 
-        var searchOptions = this.CreateSearchOptions(this._context.Variables);
-
-        var sb = new StringBuilder();
-
-        // apply conditional url depends on stage int or prd
-        var documents = await searchClient.SearchAsync<SearchDocument>($"{query}", searchOptions, this._context.CancellationToken);
-
-        foreach (var doc in documents.Value.GetResults())
+        if (this._searchConfig != null
+            && !string.IsNullOrWhiteSpace(this._searchConfig.SearchServiceName)
+            && !string.IsNullOrWhiteSpace(this._searchConfig.SearchServiceQueryApiKey))
         {
-            string id = (string)doc.Document["Id"];
-            string hospitalId = (string)doc.Document["HospitalId"];
-            string sourceEntityId = (string)doc.Document["SourceEntityId"];
-            string sourceEntityName = (string)doc.Document["SourceEntityName"];
-            string slug = (string)doc.Document["Slug_en"];
-            string content = (string)doc.Document["Content_en"];
-            string sourcePage = (string)doc.Document["SourcePage"];
-            content = content.Replace('\r', ' ').Replace('\n', ' ');
 
-            sb.AppendLine($"{sourcePage}: {content}");
+            var searchOptions = new SearchOptions()
+            {
+                IncludeTotalCount = false,
+                Size = 3,
+                Select = { "Id" },
+                Filter = "",
+                SearchFields = { "en/Name" },
+                OrderBy = { "" }
+            };
+
+            var srchclient = this.indexClient.GetSearchClient(SpecialtyIndex);
+            var documents = await srchclient.SearchAsync<SearchDocument>($"{query}", this.searchOptions, this._context.CancellationToken);
+
+            foreach (var doc in documents.Value.GetResults().Take(5))
+            {
+                result.Add((string)doc.Document["Id"]);
+            }
         }
-        return sb.ToString();
 
+        return result;
     }
 
-    private SearchClient CreateSearchClient(string indexName)
+    private string CreateFilter(List<string> SpecialtyIds)
     {
-        var config = new Dictionary<string, object>();
-
-        if (this._memoriesStoreOptions.IsUseAzureAISearch(this._context.GetConfiguration))
+        //( HospitalSpecialties/any(hospitalSpecialty: hospitalSpecialty/Specialty/Id eq '<firstId>' or hospitalSpecialty/Specialty/Id eq '<secondId>')) 
+        var builder = new StringBuilder(200);
+        if (SpecialtyIds != null && SpecialtyIds.Count > 0)
         {
-            var azureSearchConfig = this._memoriesStoreOptions.GetAzureAISearch(this._context.GetConfiguration);
-            var endPoint = new Uri(uriString: azureSearchConfig.Endpoint);
-            var credential = new AzureKeyCredential(azureSearchConfig.APIKey);
-            var client = new SearchClient(endPoint, indexName, credential);
-            this._logger.LogDebug("SearchClient created with indexName: {0}", indexName);
-            return client;
+            builder.Append("(HospitalSpecialties/any(hs:");
+            int num = 0;
+            foreach (string id in SpecialtyIds)
+            {
+                if (num > 0)
+                {
+                    builder.Append(" or");
+                }
+
+                builder.Append($" hs/Specialty/Id eq '{id}'");
+
+                num++;
+            }
+            builder.Append("))");
+        }
+        return builder.ToString();
+    }
+
+    public async Task<List<HospitalData>> HospitalSearchAsync(string query, List<string> SpecialtyIds)
+    {
+        var result = new List<HospitalData>();
+
+        if (this._searchConfig != null
+            && !string.IsNullOrWhiteSpace(this._searchConfig.SearchServiceName)
+            && !string.IsNullOrWhiteSpace(this._searchConfig.SearchServiceQueryApiKey))
+        {
+            var searchOptions = new SearchOptions()
+            {
+                IncludeTotalCount = false,
+                Size = 3,
+                Select = { "Id" },
+                SearchFields = { "HospitalSpecialties/en/Name" },
+                Filter = this.CreateFilter(SpecialtyIds),
+                OrderBy = { "" }
+            };
+            
+            var srchclient = this.indexClient.GetSearchClient(HospitalIndex);
+            var documents = await srchclient.SearchAsync<SearchDocument>(query, this.searchOptions, this._context.CancellationToken);
+
+            foreach (var doc in documents.Value.GetResults().Take(3))
+            {
+                string id = (string)doc.Document["Id"];
+
+                //string hospitalId = (string)doc.Document["HospitalId"];
+                //string sourceEntityId = (string)doc.Document["SourceEntityId"];
+                //string sourceEntityName = (string)doc.Document["SourceEntityName"];
+                //string slug = (string)doc.Document["Slug_en"];
+                //string content = (string)doc.Document["Content_en"];
+                //string sourcePage = (string)doc.Document["SourcePage"];
+                //content = content.Replace('\r', ' ').Replace('\n', ' ');
+
+                //sb.AppendLine($"{sourcePage}: {content}");
+                result.Add(new HospitalData() { Id = id, Name = "" });
+            }
         }
 
-        this._logger.LogError("AzureAISearch apiKey or endPoint is empty in appsettings.json");
-        throw new Exception("AzureAISearch apiKey or endPoint is empty in appsettings.json");
+        return result;
     }
 
     private SearchOptions CreateSearchOptions(KernelArguments context)

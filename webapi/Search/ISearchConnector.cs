@@ -1,22 +1,15 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace CopilotChat.WebApi.Search;
 
-/// <summary>
-/// Search connector interface.
-/// </summary>
 public interface ISearchConnector
 {
-    /// <summary>
-    /// Search with given query.
-    /// </summary>
-    /// <param name="indexName"></param>
-    /// <param name="query"></param>
-    /// <param name="context"></param>
-    /// <returns></returns>
-    Task<string> SearchAsync(string indexName, string query);
+    Task<List<string>> SpecialtySearchAsync(string query);
+
+    Task<List<HospitalData>> HospitalSearchAsync(string query, List<string> SpecialtyIds);
 
     void SetContext(KernelContext context);
 }

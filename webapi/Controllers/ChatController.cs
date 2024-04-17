@@ -2,7 +2,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -13,7 +12,6 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Azure;
 using CopilotChat.WebApi.Auth;
 using CopilotChat.WebApi.Configuration;
 using CopilotChat.WebApi.Hubs;
@@ -26,11 +24,12 @@ using CopilotChat.WebApi.Search;
 using CopilotChat.WebApi.Services;
 using CopilotChat.WebApi.Storage;
 using CopilotChat.WebApi.Utilities;
-using DocumentFormat.OpenXml.InkML;
+using DocumentFormat.OpenXml.Bibliography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -61,6 +60,8 @@ public class ChatController : ControllerBase, IDisposable
     private readonly IConfiguration Configuration;
     private readonly KernelMemoryConfig memoryOptions;
     private readonly ISearchConnector _searchConnector;
+    private readonly AzureSearchConfig _searchConfig;
+    private readonly ChatStoreConfig _cosmos;
 
     private const string ChatPluginName = nameof(ChatPlugin);
     private const string ChatFunctionName = "Chat";
@@ -73,6 +74,8 @@ public class ChatController : ControllerBase, IDisposable
         ITelemetryService telemetryService,
         IOptions<ServiceOptions> serviceOptions,
         CopilotApiConfiguration copliotApiConfiguration,
+        AzureSearchConfig searchConfig,
+        ChatStoreConfig cosmos,
         IOptions<KernelMemoryConfig> memoryOptions,
         IConfiguration configuration,
         ISearchConnector searchConnector,
@@ -82,12 +85,24 @@ public class ChatController : ControllerBase, IDisposable
         this._httpClientFactory = httpClientFactory;
         this._telemetryService = telemetryService;
         this._disposables = new List<IDisposable>();
+        this._searchConfig = searchConfig;
         this._serviceOptions = serviceOptions.Value;
         this._copliotApiConfiguration = copliotApiConfiguration;
+        this._cosmos = cosmos;
         this._plugins = plugins;
         this.Configuration = configuration;
         this._searchConnector = searchConnector;
         this.memoryOptions = memoryOptions.Value;
+    }
+
+    private string SearchPrompt(string keyword)
+    {
+        StringBuilder builder = new StringBuilder(200);
+        builder.AppendLine("Extract the words in the sentence within the quotation marks listed below and tell us which words are relevant to the search.");
+        builder.AppendLine("Answer the extracted words separated by commas, but do not say anything other than the extracted words.");
+        builder.AppendLine("Exclude all unnecessary words, such as adjectives, adverbs, and investigations, except those that are relevant to the search.");
+        builder.AppendLine($"\"{keyword.Replace("\"", "")}\"");
+        return builder.ToString();
     }
 
     /// <summary>
@@ -120,13 +135,6 @@ public class ChatController : ControllerBase, IDisposable
     {
         this._logger.LogDebug("Chat message received.");
 
-        if (this.User != null)
-        {
-
-        }
-
-        
-
         var response = new ServiceInfoResponse()
         {
             MemoryStore = new MemoryStoreInfoResponse()
@@ -135,6 +143,8 @@ public class ChatController : ControllerBase, IDisposable
                 SelectedType = this.memoryOptions.GetMemoryStoreType(this.Configuration).ToString(),
             }
         };
+
+        string orignQuery = ask.Input;
 
         string chatIdString = chatId.ToString();
 
@@ -165,25 +175,28 @@ public class ChatController : ControllerBase, IDisposable
         // Run the function.
         FunctionResult? result = null;
 
+        using CancellationTokenSource? cts = this._serviceOptions.TimeoutLimitInS is not null
+            ? new CancellationTokenSource(TimeSpan.FromSeconds((double)this._serviceOptions.TimeoutLimitInS))
+            : null;
         try
         {
-            using CancellationTokenSource? cts = this._serviceOptions.TimeoutLimitInS is not null
-                // Create a cancellation token source with the timeout if specified
-                ? new CancellationTokenSource(TimeSpan.FromSeconds((double)this._serviceOptions.TimeoutLimitInS))
-                : null;
-
-
-            if (this.memoryOptions.IsUseAzureAISearch(this.Configuration))
-            {
-                var kernelContext = new KernelContext(contextVariables, cts, response, this.Configuration);
-                this._searchConnector.SetContext(kernelContext);
-                var source = await this._searchConnector.SearchAsync("idx-hospital-dev", ask.Input);
-                await this.RegisterSearchResult(kernel, source);
-            }
-
             KernelFunction? chatFunction = kernel.Plugins.GetFunction(ChatPluginName, ChatFunctionName);
 
+            if (this._searchConfig != null && !string.IsNullOrWhiteSpace(this._searchConfig.SearchServiceName))
+            {
+                if (contextVariables != null && contextVariables.TryGetValue("message", out object messageObject) && messageObject is string)
+                {
+                    string msg = contextVariables["message"].ToString();
+                    if (!string.IsNullOrWhiteSpace(msg))
+                    {
+                        string prompt = this.SearchPrompt(msg);
+                        contextVariables["message"] = prompt;
+                    }
+                }
+            }
+
             result = await kernel.InvokeAsync(chatFunction!, contextVariables, cts?.Token ?? default);
+            await this.UpdateContentByChatIdAndUserIdAsync(chatIdString, authInfo.UserId, orignQuery);
             this._telemetryService.TrackPluginFunction(ChatPluginName, ChatFunctionName, true);
         }
         catch (Exception ex)
@@ -198,6 +211,36 @@ public class ChatController : ControllerBase, IDisposable
             this._telemetryService.TrackPluginFunction(ChatPluginName, ChatFunctionName, false);
 
             throw;
+        }
+
+        if (this._searchConfig != null && !string.IsNullOrWhiteSpace(this._searchConfig.SearchServiceName))
+        {
+            if (contextVariables != null && contextVariables.TryGetValue("input", out object messageObject) && messageObject is string)
+            {
+                string msg = contextVariables["input"].ToString();
+                if (!string.IsNullOrWhiteSpace(msg))
+                {
+                    var kernelContext = new KernelContext(contextVariables, cts, response, this.Configuration);
+                    this._searchConnector.SetContext(kernelContext);
+                    var specialtyIds = await this._searchConnector.SpecialtySearchAsync(msg);
+                    if (specialtyIds != null && specialtyIds.Count > 0)
+                    {
+                        var hospitals = await this._searchConnector.HospitalSearchAsync(msg, specialtyIds);
+                        if (hospitals != null && hospitals.Count > 0)
+                        {
+                            string source = String.Join(",", (from h in hospitals select h.Id));
+
+                            if (!string.IsNullOrWhiteSpace(source))
+                            {
+                                contextVariables["input"] = $"hospitals : {source}";
+                                contextVariables["message"] = orignQuery;
+                                await this.RegisterSearchResult(kernel, source);
+                                await this.UpdateContentByChatIdAndUserIdAsync(chatIdString, "Bot", $"hospitals : {source}");
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         AskResult chatAskResult = new()
@@ -329,6 +372,29 @@ public class ChatController : ControllerBase, IDisposable
 
         return authHeaders;
     }
+
+
+    private async Task UpdateContentByChatIdAndUserIdAsync(string chatId, string userId, string newContent)
+    {
+        using (var _cosmosClient = new CosmosClient(this._cosmos.Cosmos.ConnectionString))
+        {
+            var _database = _cosmosClient.GetDatabase(this._cosmos.Cosmos.Database);
+            var _container = _database.GetContainer(this._cosmos.Cosmos.ChatMessagesContainer);
+            var queryText = "SELECT TOP 1 * FROM c WHERE c.chatId = @chatId AND c.userId = @userId ORDER BY c.timestamp DESC";
+            var queryDefinition = new QueryDefinition(queryText)
+                                      .WithParameter("@chatId", chatId)
+                                      .WithParameter("@userId", userId);
+            var iterator = _container.GetItemQueryIterator<dynamic>(queryDefinition);
+            var recentRecord = (await iterator.ReadNextAsync()).FirstOrDefault();
+            if (recentRecord != null)
+            {
+                recentRecord.content = newContent;
+                var partitionKey = new PartitionKey(recentRecord.partition.ToString());
+                await _container.ReplaceItemAsync(recentRecord, recentRecord.id.ToString(), partitionKey);
+            }
+        }
+    }
+
 
     /// <summary>
     /// Register functions with the kernel.
@@ -644,4 +710,6 @@ public class BearerAuthenticationProvider
     {
         await this.AuthenticateRequestAsync(request, cancellationToken);
     }
+
+
 }

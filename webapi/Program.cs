@@ -40,6 +40,12 @@ public sealed class Program
         CopilotApiConfiguration copliotApiConfiguration = ((IConfiguration)builder.Configuration).GetSection(nameof(CopilotApiConfiguration)).Get<CopilotApiConfiguration>() ?? new CopilotApiConfiguration();
         builder.Services.AddSingleton(copliotApiConfiguration);
 
+        AzureSearchConfig azureSearchConfiguration = ((IConfiguration)builder.Configuration).GetSection(nameof(AzureSearchConfig)).Get<AzureSearchConfig>() ?? new AzureSearchConfig();
+        builder.Services.AddSingleton(azureSearchConfiguration);
+
+        ChatStoreConfig cosmosConfiguration = ((IConfiguration)builder.Configuration).GetSection("ChatStore").Get<ChatStoreConfig>() ?? new ChatStoreConfig();
+        builder.Services.AddSingleton(cosmosConfiguration);
+
         builder.Host.AddConfiguration();
         builder.WebHost.UseUrls();
 
