@@ -25,6 +25,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.OpenApi.Models;
+using Serilog;
 
 namespace CopilotChat.WebApi;
 
@@ -48,9 +49,15 @@ public sealed class Program
 
         builder.Host.AddConfiguration();
         builder.WebHost.UseUrls();
+        builder.Host.UseSerilog((hostContext, loggerConfig) =>
+        {
+            loggerConfig
+                .ReadFrom.Configuration(hostContext.Configuration)
+                .Enrich.WithProperty("ApplicationName", hostContext.HostingEnvironment.ApplicationName);
+        }); ;
 
         builder.Services
-            .AddSingleton<ILogger>(sp => sp.GetRequiredService<ILogger<Program>>())
+            //.AddSingleton<ILogger>(sp => sp.GetRequiredService<ILogger<Program>>())
             .AddOptions(builder.Configuration)
             .AddPersistentChatStore()
             .AddPlugins(builder.Configuration)
@@ -63,6 +70,7 @@ public sealed class Program
             .AddSemanticMemoryServices();
 
         builder.Services.AddSignalR();
+        
 
         DatabaseConnectionStrings databaseConnectionStrings = ((IConfiguration)builder.Configuration).GetSection("ConnectionStrings").Get<DatabaseConnectionStrings>() ?? new DatabaseConnectionStrings();
         builder.Services.AddDbContext<CopilotDbContext>(delegate (DbContextOptionsBuilder options)
@@ -165,8 +173,8 @@ public sealed class Program
 
         try
         {
-            string? address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault();
-            app.Services.GetRequiredService<ILogger>().LogInformation("Health probe: {0}/healthz", address);
+            //string? address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault();
+            //app.Services.GetRequiredService<ILogger>().LogInformation("Health probe: {0}/healthz", address);
         }
         catch (ObjectDisposedException)
         {

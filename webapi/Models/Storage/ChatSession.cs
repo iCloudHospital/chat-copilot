@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using CopilotChat.WebApi.Storage;
 
@@ -76,4 +77,12 @@ public class ChatSession : IchMessageBase, IStorageEntity
         this.SystemDescription = systemDescription;
         this.Version = CurrentVersion;
     }
+
+    public static ChatSession CreateSession(string id, string title, string description)
+    {
+        var session = new ChatSession(title, description);
+        session.Id = id;
+        return session;
+    }
+
 }

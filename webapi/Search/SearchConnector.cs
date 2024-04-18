@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -14,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.KernelMemory;
 using Microsoft.SemanticKernel;
+using Newtonsoft.Json;
 
 namespace CopilotChat.WebApi.Search;
 
@@ -72,7 +74,7 @@ public class SearchConnector : ISearchConnector
             };
 
             var srchclient = this.indexClient.GetSearchClient(SpecialtyIndex);
-            var documents = await srchclient.SearchAsync<SearchDocument>($"{query}", this.searchOptions, this._context.CancellationToken);
+            var documents = await srchclient.SearchAsync<SearchDocument>($"{query}", searchOptions, this._context.CancellationToken);
 
             foreach (var doc in documents.Value.GetResults().Take(5))
             {
@@ -110,11 +112,14 @@ public class SearchConnector : ISearchConnector
     public async Task<List<HospitalData>> HospitalSearchAsync(string query, List<string> SpecialtyIds)
     {
         var result = new List<HospitalData>();
+        
 
         if (this._searchConfig != null
             && !string.IsNullOrWhiteSpace(this._searchConfig.SearchServiceName)
             && !string.IsNullOrWhiteSpace(this._searchConfig.SearchServiceQueryApiKey))
         {
+            var stopwatch = new Stopwatch();
+
             var searchOptions = new SearchOptions()
             {
                 IncludeTotalCount = false,
@@ -124,13 +129,25 @@ public class SearchConnector : ISearchConnector
                 Filter = this.CreateFilter(SpecialtyIds),
                 OrderBy = { "" }
             };
-            
+
+            stopwatch.Start();
+
             var srchclient = this.indexClient.GetSearchClient(HospitalIndex);
-            var documents = await srchclient.SearchAsync<SearchDocument>(query, this.searchOptions, this._context.CancellationToken);
+
+            this._logger.LogDebug($"GetSearchClient ElapsedMilliseconds : {stopwatch.ElapsedMilliseconds}");
+
+            var documents = await srchclient.SearchAsync<SearchDocument>(query, searchOptions, this._context.CancellationToken);
+
+            this._logger.LogDebug($"SearchAsync ElapsedMilliseconds : {stopwatch.ElapsedMilliseconds}");
+
+            this._logger.LogDebug("HospitalSerach Query : ");
+            this._logger.LogDebug(JsonConvert.SerializeObject(searchOptions));
 
             foreach (var doc in documents.Value.GetResults().Take(3))
             {
                 string id = (string)doc.Document["Id"];
+
+                this._logger.LogDebug($"result id : {id}");
 
                 //string hospitalId = (string)doc.Document["HospitalId"];
                 //string sourceEntityId = (string)doc.Document["SourceEntityId"];
@@ -143,6 +160,10 @@ public class SearchConnector : ISearchConnector
                 //sb.AppendLine($"{sourcePage}: {content}");
                 result.Add(new HospitalData() { Id = id, Name = "" });
             }
+
+            this._logger.LogDebug($"GetResults ElapsedMilliseconds : {stopwatch.ElapsedMilliseconds}");
+
+            stopwatch.Stop();
         }
 
         return result;
